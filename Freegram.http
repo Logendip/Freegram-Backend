@@ -1,0 +1,6 @@
+@Freegram_HostAddress = http://localhost:5208
+
+GET {{Freegram_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
