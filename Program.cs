@@ -33,10 +33,10 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Frontend", policy =>
     {
         policy
-            .SetIsOriginAllowed(origin =>
-                origin == "http://localhost:3000" ||
-                origin == "http://localhost:5173" ||
-                origin == "https://freegram-frontend.vercel.app"
+            .WithOrigins(
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "https://freegram-frontend.vercel.app"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -157,7 +157,6 @@ var app = builder.Build();
 // SWAGGER
 // ==========================================
 
-// Swagger тільки локально
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -169,7 +168,7 @@ if (app.Environment.IsDevelopment())
 // ==========================================
 
 // Render працює через HTTPS reverse proxy.
-// Сам ASP.NET Core контейнер слухає HTTP на порту 10000.
+// ASP.NET Core всередині контейнера слухає HTTP.
 
 // app.UseHttpsRedirection();
 
@@ -177,7 +176,7 @@ if (app.Environment.IsDevelopment())
 // CORS
 // ==========================================
 
-// CORS має бути до Authentication / Authorization
+// CORS має виконуватися перед Authentication / Authorization.
 app.UseCors("Frontend");
 
 // ==========================================
@@ -214,4 +213,3 @@ app.MapGet("/", () => Results.Ok(new
 // ==========================================
 
 app.Run();
-
