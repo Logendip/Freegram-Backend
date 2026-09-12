@@ -1,3 +1,4 @@
+
 using Freegram.Data;
 using Freegram.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -8,25 +9,34 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Controllers
+// ==========================================
+// CONTROLLERS
+// ==========================================
+
 builder.Services.AddControllers();
 
-// PostgreSQL / Entity Framework
+// ==========================================
+// POSTGRESQL / ENTITY FRAMEWORK
+// ==========================================
+
 builder.Services.AddDbContext<FreegramDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection")
     ));
 
-// CORS для React
+// ==========================================
+// CORS
+// ==========================================
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
     {
         policy
-            .WithOrigins(
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "https://freegram-frontend.vercel.app"
+            .SetIsOriginAllowed(origin =>
+                origin == "http://localhost:3000" ||
+                origin == "http://localhost:5173" ||
+                origin == "https://freegram-frontend.vercel.app"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -34,10 +44,16 @@ builder.Services.AddCors(options =>
     });
 });
 
-// SignalR
+// ==========================================
+// SIGNALR
+// ==========================================
+
 builder.Services.AddSignalR();
 
-// JWT Authentication
+// ==========================================
+// JWT AUTHENTICATION
+// ==========================================
+
 builder.Services.AddAuthentication(
     JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -86,10 +102,16 @@ builder.Services.AddAuthentication(
         };
     });
 
-// Authorization
+// ==========================================
+// AUTHORIZATION
+// ==========================================
+
 builder.Services.AddAuthorization();
 
-// Swagger
+// ==========================================
+// SWAGGER
+// ==========================================
+
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
@@ -125,7 +147,15 @@ builder.Services.AddSwaggerGen(options =>
         });
 });
 
+// ==========================================
+// BUILD APPLICATION
+// ==========================================
+
 var app = builder.Build();
+
+// ==========================================
+// SWAGGER
+// ==========================================
 
 // Swagger тільки локально
 if (app.Environment.IsDevelopment())
@@ -134,27 +164,54 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// ==========================================
+// HTTPS
+// ==========================================
+
 // Render працює через HTTPS reverse proxy.
 // Сам ASP.NET Core контейнер слухає HTTP на порту 10000.
+
 // app.UseHttpsRedirection();
+
+// ==========================================
+// CORS
+// ==========================================
 
 // CORS має бути до Authentication / Authorization
 app.UseCors("Frontend");
 
+// ==========================================
+// AUTHENTICATION / AUTHORIZATION
+// ==========================================
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Controllers
+// ==========================================
+// CONTROLLERS
+// ==========================================
+
 app.MapControllers();
 
-// SignalR Hub
+// ==========================================
+// SIGNALR
+// ==========================================
+
 app.MapHub<ChatHub>("/hubs/chat");
 
-// Health check / root endpoint
+// ==========================================
+// HEALTH CHECK / ROOT
+// ==========================================
+
 app.MapGet("/", () => Results.Ok(new
 {
     status = "ok",
     service = "Freegram Backend"
 }));
 
+// ==========================================
+// RUN
+// ==========================================
+
 app.Run();
+
