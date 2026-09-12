@@ -1,4 +1,3 @@
-
 using Freegram.Data;
 using Freegram.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,8 +8,10 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Controllers
 builder.Services.AddControllers();
 
+// PostgreSQL / Entity Framework
 builder.Services.AddDbContext<FreegramDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection")
@@ -85,6 +86,7 @@ builder.Services.AddAuthentication(
         };
     });
 
+// Authorization
 builder.Services.AddAuthorization();
 
 // Swagger
@@ -125,24 +127,34 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+// Swagger тільки локально
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-//app.UseHttpsRedirection();
+// Render працює через HTTPS reverse proxy.
+// Сам ASP.NET Core контейнер слухає HTTP на порту 10000.
+// app.UseHttpsRedirection();
 
-// CORS має бути до authentication/authorization
+// CORS має бути до Authentication / Authorization
 app.UseCors("Frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Controllers
 app.MapControllers();
 
 // SignalR Hub
 app.MapHub<ChatHub>("/hubs/chat");
 
-app.Run();
+// Health check / root endpoint
+app.MapGet("/", () => Results.Ok(new
+{
+    status = "ok",
+    service = "Freegram Backend"
+}));
 
+app.Run();
