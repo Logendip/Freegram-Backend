@@ -1,10 +1,10 @@
 ﻿using Freegram.Data;
+using Freegram.Hubs;
 using Freegram.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Freegram.Hubs;
 using System.Security.Claims;
 
 namespace Freegram.Controllers;
@@ -25,24 +25,9 @@ public class ChatsController : ControllerBase
         _hubContext = hubContext;
     }
 
-    private int GetCurrentUserId()
-    {
-        var userId =
-            User.FindFirstValue(
-                ClaimTypes.NameIdentifier);
-
-        if (userId == null)
-        {
-            throw new UnauthorizedAccessException(
-                "User is not authenticated."
-            );
-        }
-
-        return int.Parse(userId);
-    }
 
     // ==========================================
-    // GET ALL CHATS
+    // GET CHATS
     // ==========================================
 
     [HttpGet]
@@ -53,52 +38,50 @@ public class ChatsController : ControllerBase
 
         var chats =
             await _context.Chats
-                .Include(c => c.Members)
-                    .ThenInclude(m => m.User)
                 .Where(c =>
                     c.Members.Any(m =>
-                        m.UserId ==
-                        currentUserId))
+                        m.UserId == currentUserId))
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .Include(c =>
+                    c.Creator)
                 .OrderByDescending(c =>
-                    c.CreatedAt)
-                .Select(c => new
-                {
-                    c.Id,
-                    c.Name,
-                    c.IsGroup,
-                    c.CreatedAt,
-
-                    Members =
-                        c.Members
-                            .Where(m =>
-                                m.User != null)
-                            .Select(m => new
-                            {
-                                m.User.Id,
-                                m.User.Nickname
-                            })
-                            .ToList(),
-
-                    UnreadCount =
-                        c.Messages
-                            .Count(message =>
-                                message.SenderId !=
-                                    currentUserId &&
-
-                                !message.DeletedByUsers
-                                    .Any(deleted =>
-                                        deleted.UserId ==
-                                        currentUserId) &&
-
-                                !message.ReadByUsers
-                                    .Any(read =>
-                                        read.UserId ==
-                                        currentUserId))
-                })
+                    c.Messages
+                        .OrderByDescending(m =>
+                            m.CreatedAt)
+                        .Select(m =>
+                            (DateTime?)m.CreatedAt)
+                        .FirstOrDefault()
+                        ?? c.CreatedAt)
                 .ToListAsync();
 
-        return Ok(chats);
+        var result =
+            chats.Select(chat =>
+                new
+                {
+                    chat.Id,
+                    chat.Name,
+                    chat.IsGroup,
+                    chat.CreatorId,
+                    chat.CreatedAt,
+
+                    Members =
+                        chat.Members.Select(member =>
+                            new
+                            {
+                                member.UserId,
+                                member.User.Nickname
+                            }),
+
+                    UnreadCount =
+                        0
+                });
+
+        return Ok(result);
     }
+
 
     // ==========================================
     // GET MESSAGES
@@ -115,8 +98,7 @@ public class ChatsController : ControllerBase
             await _context.ChatMembers
                 .AnyAsync(m =>
                     m.ChatId == chatId &&
-                    m.UserId ==
-                    currentUserId);
+                    m.UserId == currentUserId);
 
         if (!isMember)
         {
@@ -125,15 +107,21 @@ public class ChatsController : ControllerBase
 
         var messages =
             await _context.Messages
-                .Include(m => m.Sender)
                 .Where(m =>
                     m.ChatId == chatId &&
                     !m.DeletedByUsers.Any(d =>
-                        d.UserId ==
-                        currentUserId))
+                        d.UserId == currentUserId))
+                .Include(m =>
+                    m.Sender)
+                .Include(m =>
+                    m.ReadByUsers)
                 .OrderBy(m =>
                     m.CreatedAt)
-                .Select(m => new
+                .ToListAsync();
+
+        var result =
+            messages.Select(m =>
+                new
                 {
                     m.Id,
                     m.ChatId,
@@ -149,16 +137,14 @@ public class ChatsController : ControllerBase
                     IsRead =
                         m.SenderId == currentUserId
                             ? m.ReadByUsers.Any(r =>
-                                r.UserId !=
-                                currentUserId)
+                                r.UserId != currentUserId)
                             : m.ReadByUsers.Any(r =>
-                                r.UserId ==
-                                currentUserId)
-                })
-                .ToListAsync();
+                                r.UserId == currentUserId)
+                });
 
-        return Ok(messages);
+        return Ok(result);
     }
+
 
     // ==========================================
     // SEND MESSAGE
@@ -167,26 +153,23 @@ public class ChatsController : ControllerBase
     [HttpPost("{chatId}/messages")]
     public async Task<IActionResult> SendMessage(
         int chatId,
-        [FromBody] string content)
+        [FromBody] SendMessageRequest request)
     {
         var currentUserId =
             GetCurrentUserId();
 
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(
+                request.Content))
         {
-            return BadRequest(new
-            {
-                message =
-                    "Message content is required."
-            });
+            return BadRequest(
+                "Message content is required.");
         }
 
         var isMember =
             await _context.ChatMembers
                 .AnyAsync(m =>
                     m.ChatId == chatId &&
-                    m.UserId ==
-                    currentUserId);
+                    m.UserId == currentUserId);
 
         if (!isMember)
         {
@@ -196,45 +179,175 @@ public class ChatsController : ControllerBase
         var message =
             new Message
             {
-                ChatId =
-                    chatId,
-
-                SenderId =
-                    currentUserId,
-
-                Content =
-                    content.Trim(),
-
-                CreatedAt =
-                    DateTime.UtcNow
+                ChatId = chatId,
+                SenderId = currentUserId,
+                Content = request.Content.Trim(),
+                CreatedAt = DateTime.UtcNow
             };
 
-        _context.Messages.Add(
-            message);
+        _context.Messages.Add(message);
 
         await _context.SaveChangesAsync();
 
-        var sender =
+        return Ok(message);
+    }
+
+
+    // ==========================================
+    // CREATE PRIVATE CHAT
+    // ==========================================
+
+    [HttpPost("private")]
+    public async Task<IActionResult> CreatePrivateChat(
+        [FromBody] CreatePrivateChatRequest request)
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        if (request.UserId == currentUserId)
+        {
+            return BadRequest(
+                "You cannot create a chat with yourself.");
+        }
+
+        var targetUser =
             await _context.Users
-                .Where(u =>
-                    u.Id ==
-                    currentUserId)
-                .Select(u => new
+                .FirstOrDefaultAsync(u =>
+                    u.Id == request.UserId);
+
+        if (targetUser == null)
+        {
+            return NotFound(
+                "User not found.");
+        }
+
+        var existingChat =
+            await _context.Chats
+                .Where(c =>
+                    !c.IsGroup &&
+                    c.Members.Count == 2 &&
+                    c.Members.Any(m =>
+                        m.UserId == currentUserId) &&
+                    c.Members.Any(m =>
+                        m.UserId == request.UserId))
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .FirstOrDefaultAsync();
+
+        if (existingChat != null)
+        {
+            return Ok(new
+            {
+                chat = new
                 {
-                    u.Id,
-                    u.Nickname
-                })
+                    existingChat.Id,
+                    existingChat.Name,
+                    existingChat.IsGroup,
+                    existingChat.CreatorId,
+                    existingChat.CreatedAt,
+
+                    Members =
+                        existingChat.Members.Select(m =>
+                            new
+                            {
+                                m.UserId,
+                                m.User.Nickname
+                            })
+                }
+            });
+        }
+
+        var chat =
+            new Chat
+            {
+                IsGroup = false,
+                CreatorId = currentUserId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+        _context.Chats.Add(chat);
+
+        await _context.SaveChangesAsync();
+
+        var members =
+            new List<ChatMember>
+            {
+                new ChatMember
+                {
+                    ChatId = chat.Id,
+                    UserId = currentUserId,
+                    JoinedAt = DateTime.UtcNow
+                }
+            };
+
+        _context.ChatMembers.AddRange(members);
+
+        var chatRequest =
+            new ChatRequest
+            {
+                ChatId = chat.Id,
+                SenderId = currentUserId,
+                ReceiverId = request.UserId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+        _context.ChatRequests.Add(
+            chatRequest);
+
+        await _context.SaveChangesAsync();
+
+        await _hubContext.Clients
+            .User(request.UserId.ToString())
+            .SendAsync(
+                "ChatRequestCreated",
+                new
+                {
+                    Id = chatRequest.Id,
+                    ChatId = chat.Id,
+                    Sender = new
+                    {
+                        Id = currentUserId,
+                        Nickname =
+                            User.FindFirstValue(
+                                ClaimTypes.Name)
+                    },
+                    CreatedAt =
+                        chatRequest.CreatedAt
+                });
+
+        var createdChat =
+            await _context.Chats
+                .Where(c =>
+                    c.Id == chat.Id)
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
                 .FirstAsync();
 
         return Ok(new
         {
-            message.Id,
-            message.ChatId,
-            message.Content,
-            message.CreatedAt,
-            Sender = sender
+            chat = new
+            {
+                createdChat.Id,
+                createdChat.Name,
+                createdChat.IsGroup,
+                createdChat.CreatorId,
+                createdChat.CreatedAt,
+
+                Members =
+                    createdChat.Members.Select(m =>
+                        new
+                        {
+                            m.UserId,
+                            m.User.Nickname
+                        })
+            }
         });
     }
+
 
     // ==========================================
     // CREATE GROUP CHAT
@@ -247,179 +360,188 @@ public class ChatsController : ControllerBase
         var currentUserId =
             GetCurrentUserId();
 
-        if (request == null)
+        if (string.IsNullOrWhiteSpace(
+                request.Name))
         {
-            return BadRequest(new
-            {
-                message =
-                    "Request is required."
-            });
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            return BadRequest(new
-            {
-                message =
-                    "Group name is required."
-            });
-        }
-
-        var groupName =
-            request.Name.Trim();
-
-        if (groupName.Length > 100)
-        {
-            return BadRequest(new
-            {
-                message =
-                    "Group name cannot exceed 100 characters."
-            });
+            return BadRequest(
+                "Group name is required.");
         }
 
         var requestedUserIds =
-            request.UserIds
-                ?? new List<int>();
-
-        // ==========================================
-        // REMOVE DUPLICATES
-        // ==========================================
-
-        var memberUserIds =
-            requestedUserIds
-                .Append(currentUserId)
+            request.UserIds?
                 .Distinct()
+                .ToList()
+            ?? new List<int>();
+
+        requestedUserIds =
+            requestedUserIds
+                .Where(id =>
+                    id != currentUserId)
                 .ToList();
 
-        if (memberUserIds.Count < 2)
+        if (requestedUserIds.Count == 0)
         {
-            return BadRequest(new
-            {
-                message =
-                    "A group must contain at least 2 users."
-            });
+            return BadRequest(
+                "Select at least one user.");
         }
 
-        // ==========================================
-        // CHECK USERS
-        // ==========================================
-
-        var users =
+        var existingUsers =
             await _context.Users
                 .Where(u =>
-                    memberUserIds.Contains(u.Id))
-                .Select(u => new
-                {
-                    u.Id,
-                    u.Nickname
-                })
+                    requestedUserIds.Contains(u.Id))
+                .Select(u =>
+                    new
+                    {
+                        u.Id,
+                        u.Nickname
+                    })
                 .ToListAsync();
 
-        if (users.Count !=
-            memberUserIds.Count)
+        var existingUserIds =
+            existingUsers
+                .Select(u => u.Id)
+                .ToList();
+
+        if (existingUserIds.Count !=
+            requestedUserIds.Count)
         {
-            return BadRequest(new
-            {
-                message =
-                    "One or more selected users were not found."
-            });
+            return BadRequest(
+                "One or more users were not found.");
         }
 
+        var creator =
+            await _context.Users
+                .FirstAsync(u =>
+                    u.Id == currentUserId);
+
         // ==========================================
-        // CREATE CHAT
+        // CREATE GROUP
         // ==========================================
 
         var chat =
             new Chat
             {
-                Name =
-                    groupName,
-
-                IsGroup =
-                    true,
-
-                CreatorId =
-                    currentUserId,
-
-                CreatedAt =
-                    DateTime.UtcNow
+                Name = request.Name.Trim(),
+                IsGroup = true,
+                CreatorId = currentUserId,
+                CreatedAt = DateTime.UtcNow
             };
 
         _context.Chats.Add(chat);
 
         await _context.SaveChangesAsync();
 
+
         // ==========================================
-        // ADD MEMBERS
+        // CREATOR BECOMES MEMBER
         // ==========================================
 
-        var members =
-            memberUserIds
-                .Select(userId =>
-                    new ChatMember
-                    {
-                        ChatId =
-                            chat.Id,
+        var creatorMember =
+            new ChatMember
+            {
+                ChatId = chat.Id,
+                UserId = currentUserId,
+                JoinedAt = DateTime.UtcNow
+            };
 
-                        UserId =
-                            userId,
+        _context.ChatMembers.Add(
+            creatorMember);
 
-                        JoinedAt =
-                            DateTime.UtcNow
-                    })
+
+        // ==========================================
+        // CREATE INVITATIONS
+        // ==========================================
+
+        var invitations =
+            existingUserIds.Select(userId =>
+                new GroupInvitation
+                {
+                    ChatId = chat.Id,
+                    InvitedUserId = userId,
+                    InvitedByUserId =
+                        currentUserId,
+                    CreatedAt =
+                        DateTime.UtcNow
+                })
                 .ToList();
 
-        _context.ChatMembers.AddRange(
-            members);
+        _context.GroupInvitations.AddRange(
+            invitations);
 
         await _context.SaveChangesAsync();
 
+
         // ==========================================
-        // LOAD CREATED CHAT
+        // SEND REALTIME INVITATIONS
+        // ==========================================
+
+        foreach (var invitation in invitations)
+        {
+            await _hubContext.Clients
+                .User(
+                    invitation.InvitedUserId
+                        .ToString())
+                .SendAsync(
+                    "GroupInvitationReceived",
+                    new
+                    {
+                        InvitationId =
+                            invitation.Id,
+
+                        ChatId =
+                            chat.Id,
+
+                        ChatName =
+                            chat.Name,
+
+                        CreatedAt =
+                            invitation.CreatedAt,
+
+                        Sender = new
+                        {
+                            Id =
+                                creator.Id,
+
+                            Nickname =
+                                creator.Nickname
+                        }
+                    });
+        }
+
+
+        // ==========================================
+        // RETURN GROUP TO CREATOR
         // ==========================================
 
         var createdChat =
             await _context.Chats
-                .Include(c => c.Members)
-                    .ThenInclude(m => m.User)
-                .FirstAsync(c =>
-                    c.Id ==
-                    chat.Id);
+                .Where(c =>
+                    c.Id == chat.Id)
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .FirstAsync();
 
-        var chatData = new
-        {
-            createdChat.Id,
-            createdChat.Name,
-            createdChat.IsGroup,
-            createdChat.CreatedAt,
+        var chatData =
+            new
+            {
+                createdChat.Id,
+                createdChat.Name,
+                createdChat.IsGroup,
+                createdChat.CreatorId,
+                createdChat.CreatedAt,
 
-            Members =
-                createdChat.Members
-                    .Where(m =>
-                        m.User != null)
-                    .Select(m => new
-                    {
-                        m.User.Id,
-                        m.User.Nickname
-                    })
-                    .ToList()
-        };
+                Members =
+                    createdChat.Members.Select(m =>
+                        new
+                        {
+                            m.UserId,
+                            m.User.Nickname
+                        }),
 
-        // ==========================================
-        // NOTIFY ALL MEMBERS
-        // ==========================================
-
-        foreach (var userId in memberUserIds)
-        {
-            await _hubContext.Clients
-                .User(
-                    userId.ToString()
-                )
-                .SendAsync(
-                    "GroupChatCreated",
-                    chatData
-                );
-        }
+                UnreadCount = 0
+            };
 
         return Ok(new
         {
@@ -427,233 +549,9 @@ public class ChatsController : ControllerBase
         });
     }
 
-    // ==========================================
-    // CREATE PRIVATE CHAT
-    // ==========================================
-
-    [HttpPost("private/{userId}")]
-    public async Task<IActionResult> CreatePrivateChat(
-        int userId)
-    {
-        var currentUserId =
-            GetCurrentUserId();
-
-        if (currentUserId == userId)
-        {
-            return BadRequest(new
-            {
-                message =
-                    "You cannot create a chat with yourself."
-            });
-        }
-
-        var targetUser =
-            await _context.Users
-                .FirstOrDefaultAsync(u =>
-                    u.Id == userId);
-
-        if (targetUser == null)
-        {
-            return NotFound(new
-            {
-                message =
-                    "User not found."
-            });
-        }
-
-        var existingChat =
-            await _context.Chats
-                .Include(c => c.Members)
-                    .ThenInclude(m => m.User)
-                .Where(c =>
-                    !c.IsGroup &&
-                    c.Members.Any(m =>
-                        m.UserId ==
-                        currentUserId) &&
-                    c.Members.Any(m =>
-                        m.UserId ==
-                        userId))
-                .FirstOrDefaultAsync();
-
-        if (existingChat != null)
-        {
-            return Ok(new
-            {
-                chat = new
-                {
-                    existingChat.Id,
-                    existingChat.Name,
-                    existingChat.IsGroup,
-                    existingChat.CreatedAt,
-
-                    Members =
-                        existingChat.Members
-                            .Where(m =>
-                                m.User != null)
-                            .Select(m => new
-                            {
-                                m.User.Id,
-                                m.User.Nickname
-                            })
-                            .ToList()
-                },
-
-                pendingRequest = false
-            });
-        }
-
-        var existingRequest =
-            await _context.ChatRequests
-                .Include(r => r.Chat)
-                    .ThenInclude(c => c.Members)
-                        .ThenInclude(m => m.User)
-                .FirstOrDefaultAsync(r =>
-                    r.SenderId ==
-                    currentUserId &&
-                    r.ReceiverId ==
-                    userId);
-
-        if (existingRequest != null)
-        {
-            var pendingChat =
-                existingRequest.Chat;
-
-            return Ok(new
-            {
-                chat = new
-                {
-                    pendingChat.Id,
-                    pendingChat.Name,
-                    pendingChat.IsGroup,
-                    pendingChat.CreatedAt,
-
-                    Members =
-                        pendingChat.Members
-                            .Where(m =>
-                                m.User != null)
-                            .Select(m => new
-                            {
-                                m.User.Id,
-                                m.User.Nickname
-                            })
-                            .ToList()
-                },
-
-                pendingRequest = true
-            });
-        }
-
-        var chat =
-            new Chat
-            {
-                Name = null,
-                IsGroup = false,
-                CreatedAt =
-                    DateTime.UtcNow
-            };
-
-        _context.Chats.Add(chat);
-
-        await _context.SaveChangesAsync();
-
-        var senderMember =
-            new ChatMember
-            {
-                ChatId =
-                    chat.Id,
-
-                UserId =
-                    currentUserId,
-
-                JoinedAt =
-                    DateTime.UtcNow
-            };
-
-        _context.ChatMembers.Add(
-            senderMember);
-
-        var request =
-            new ChatRequest
-            {
-                ChatId =
-                    chat.Id,
-
-                SenderId =
-                    currentUserId,
-
-                ReceiverId =
-                    userId,
-
-                CreatedAt =
-                    DateTime.UtcNow
-            };
-
-        _context.ChatRequests.Add(
-            request);
-
-        await _context.SaveChangesAsync();
-
-        var createdChat =
-            await _context.Chats
-                .Include(c => c.Members)
-                    .ThenInclude(m => m.User)
-                .FirstAsync(c =>
-                    c.Id ==
-                    chat.Id);
-
-        await _hubContext.Clients
-            .User(
-                userId.ToString()
-            )
-            .SendAsync(
-                "ChatRequestCreated",
-                new
-                {
-                    RequestId =
-                        request.Id,
-
-                    ChatId =
-                        chat.Id,
-
-                    Sender = new
-                    {
-                        Id =
-                            currentUserId,
-
-                        Nickname =
-                            User.FindFirstValue(
-                                ClaimTypes.Name)
-                    }
-                }
-            );
-
-        return Ok(new
-        {
-            chat = new
-            {
-                createdChat.Id,
-                createdChat.Name,
-                createdChat.IsGroup,
-                createdChat.CreatedAt,
-
-                Members =
-                    createdChat.Members
-                        .Where(m =>
-                            m.User != null)
-                        .Select(m => new
-                        {
-                            m.User.Id,
-                            m.User.Nickname
-                        })
-                        .ToList()
-            },
-
-            pendingRequest = true
-        });
-    }
 
     // ==========================================
-    // GET CHAT REQUESTS
+    // GET PRIVATE CHAT REQUESTS
     // ==========================================
 
     [HttpGet("requests")]
@@ -664,37 +562,36 @@ public class ChatsController : ControllerBase
 
         var requests =
             await _context.ChatRequests
-                .Include(r => r.Sender)
-                .Include(r => r.Chat)
                 .Where(r =>
                     r.ReceiverId ==
                     currentUserId)
+                .Include(r =>
+                    r.Sender)
+                .Include(r =>
+                    r.Chat)
                 .OrderByDescending(r =>
                     r.CreatedAt)
-                .Select(r => new
-                {
-                    RequestId =
+                .Select(r =>
+                    new
+                    {
                         r.Id,
-
-                    ChatId =
                         r.ChatId,
-
-                    CreatedAt =
                         r.CreatedAt,
 
-                    Sender = new
-                    {
-                        r.Sender.Id,
-                        r.Sender.Nickname
-                    }
-                })
+                        Sender = new
+                        {
+                            r.Sender.Id,
+                            r.Sender.Nickname
+                        }
+                    })
                 .ToListAsync();
 
         return Ok(requests);
     }
 
+
     // ==========================================
-    // ACCEPT CHAT REQUEST
+    // ACCEPT PRIVATE CHAT REQUEST
     // ==========================================
 
     [HttpPost("requests/{requestId}/accept")]
@@ -706,40 +603,28 @@ public class ChatsController : ControllerBase
 
         var request =
             await _context.ChatRequests
-                .Include(r => r.Chat)
-                    .ThenInclude(c => c.Members)
-                        .ThenInclude(m => m.User)
-                .Include(r => r.Sender)
-                .Include(r => r.Receiver)
+                .Include(r =>
+                    r.Chat)
+                    .ThenInclude(c =>
+                        c.Members)
                 .FirstOrDefaultAsync(r =>
-                    r.Id == requestId);
+                    r.Id == requestId &&
+                    r.ReceiverId ==
+                    currentUserId);
 
         if (request == null)
         {
-            return NotFound(new
-            {
-                message =
-                    "Chat request not found."
-            });
-        }
-
-        if (request.ReceiverId !=
-            currentUserId)
-        {
-            return Forbid();
+            return NotFound(
+                "Chat request not found.");
         }
 
         var alreadyMember =
-            await _context.ChatMembers
-                .AnyAsync(m =>
-                    m.ChatId ==
-                    request.ChatId &&
-                    m.UserId ==
-                    currentUserId);
+            request.Chat.Members.Any(m =>
+                m.UserId == currentUserId);
 
         if (!alreadyMember)
         {
-            var newMember =
+            _context.ChatMembers.Add(
                 new ChatMember
                 {
                     ChatId =
@@ -750,12 +635,7 @@ public class ChatsController : ControllerBase
 
                     JoinedAt =
                         DateTime.UtcNow
-                };
-
-            _context.ChatMembers.Add(
-                newMember);
-
-            await _context.SaveChangesAsync();
+                });
         }
 
         _context.ChatRequests.Remove(
@@ -765,26 +645,37 @@ public class ChatsController : ControllerBase
 
         var chat =
             await _context.Chats
-                .Include(c => c.Members)
-                    .ThenInclude(m => m.User)
-                .FirstOrDefaultAsync(c =>
-                    c.Id ==
-                    request.ChatId);
+                .Where(c =>
+                    c.Id == request.ChatId)
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .FirstAsync();
 
-        if (chat == null)
-        {
-            return NotFound(new
+        var chatData =
+            new
             {
-                message =
-                    "Chat not found."
-            });
-        }
+                chat.Id,
+                chat.Name,
+                chat.IsGroup,
+                chat.CreatorId,
+                chat.CreatedAt,
+
+                Members =
+                    chat.Members.Select(m =>
+                        new
+                        {
+                            m.UserId,
+                            m.User.Nickname
+                        }),
+
+                UnreadCount = 0
+            };
 
         await _hubContext.Clients
             .User(
-                request.SenderId
-                    .ToString()
-            )
+                request.SenderId.ToString())
             .SendAsync(
                 "ChatRequestAccepted",
                 new
@@ -794,37 +685,17 @@ public class ChatsController : ControllerBase
 
                     UserId =
                         currentUserId
-                }
-            );
+                });
 
         return Ok(new
         {
-            message =
-                "Chat request accepted.",
-
-            chat = new
-            {
-                chat.Id,
-                chat.Name,
-                chat.IsGroup,
-                chat.CreatedAt,
-
-                Members =
-                    chat.Members
-                        .Where(m =>
-                            m.User != null)
-                        .Select(m => new
-                        {
-                            m.User.Id,
-                            m.User.Nickname
-                        })
-                        .ToList()
-            }
+            chat = chatData
         });
     }
 
+
     // ==========================================
-    // REJECT CHAT REQUEST
+    // REJECT PRIVATE CHAT REQUEST
     // ==========================================
 
     [HttpDelete("requests/{requestId}")]
@@ -837,61 +708,270 @@ public class ChatsController : ControllerBase
         var request =
             await _context.ChatRequests
                 .FirstOrDefaultAsync(r =>
-                    r.Id == requestId);
+                    r.Id == requestId &&
+                    r.ReceiverId ==
+                    currentUserId);
 
         if (request == null)
         {
-            return NotFound(new
-            {
-                message =
-                    "Chat request not found."
-            });
+            return NotFound(
+                "Chat request not found.");
         }
-
-        if (request.ReceiverId !=
-            currentUserId)
-        {
-            return Forbid();
-        }
-
-        var chatId =
-            request.ChatId;
-
-        var senderId =
-            request.SenderId;
 
         _context.ChatRequests.Remove(
             request);
 
         await _context.SaveChangesAsync();
 
-        var chat =
-            await _context.Chats
-                .FirstOrDefaultAsync(c =>
-                    c.Id == chatId);
+        return Ok();
+    }
 
-        if (chat != null)
+
+    // ==========================================
+    // GET GROUP INVITATIONS
+    // ==========================================
+
+    [HttpGet("group-invitations")]
+    public async Task<IActionResult>
+        GetGroupInvitations()
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        var invitations =
+            await _context.GroupInvitations
+                .Where(i =>
+                    i.InvitedUserId ==
+                    currentUserId)
+                .Include(i =>
+                    i.Chat)
+                .Include(i =>
+                    i.InvitedByUser)
+                .OrderByDescending(i =>
+                    i.CreatedAt)
+                .Select(i =>
+                    new
+                    {
+                        InvitationId =
+                            i.Id,
+
+                        ChatId =
+                            i.ChatId,
+
+                        ChatName =
+                            i.Chat.Name,
+
+                        CreatedAt =
+                            i.CreatedAt,
+
+                        Sender = new
+                        {
+                            Id =
+                                i.InvitedByUser.Id,
+
+                            Nickname =
+                                i.InvitedByUser.Nickname
+                        }
+                    })
+                .ToListAsync();
+
+        return Ok(invitations);
+    }
+
+
+    // ==========================================
+    // ACCEPT GROUP INVITATION
+    // ==========================================
+
+    [HttpPost(
+        "group-invitations/{invitationId}/accept")]
+    public async Task<IActionResult>
+        AcceptGroupInvitation(
+            int invitationId)
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        var invitation =
+            await _context.GroupInvitations
+                .Include(i =>
+                    i.Chat)
+                    .ThenInclude(c =>
+                        c.Members)
+                .FirstOrDefaultAsync(i =>
+                    i.Id == invitationId &&
+                    i.InvitedUserId ==
+                    currentUserId);
+
+        if (invitation == null)
         {
-            _context.Chats.Remove(chat);
-
-            await _context.SaveChangesAsync();
+            return NotFound(
+                "Group invitation not found.");
         }
 
-        await _hubContext.Clients
-            .User(
-                senderId.ToString()
-            )
-            .SendAsync(
-                "ChatDeleted",
-                chatId
-            );
+        if (invitation.Chat == null)
+        {
+            _context.GroupInvitations.Remove(
+                invitation);
+
+            await _context.SaveChangesAsync();
+
+            return NotFound(
+                "Group no longer exists.");
+        }
+
+        if (!invitation.Chat.IsGroup)
+        {
+            _context.GroupInvitations.Remove(
+                invitation);
+
+            await _context.SaveChangesAsync();
+
+            return BadRequest(
+                "This chat is not a group.");
+        }
+
+        var alreadyMember =
+            invitation.Chat.Members.Any(m =>
+                m.UserId == currentUserId);
+
+        if (!alreadyMember)
+        {
+            _context.ChatMembers.Add(
+                new ChatMember
+                {
+                    ChatId =
+                        invitation.ChatId,
+
+                    UserId =
+                        currentUserId,
+
+                    JoinedAt =
+                        DateTime.UtcNow
+                });
+        }
+
+        _context.GroupInvitations.Remove(
+            invitation);
+
+        await _context.SaveChangesAsync();
+
+
+        // ==========================================
+        // LOAD FULL CHAT
+        // ==========================================
+
+        var chat =
+            await _context.Chats
+                .Where(c =>
+                    c.Id == invitation.ChatId)
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .FirstOrDefaultAsync();
+
+        if (chat == null)
+        {
+            return NotFound(
+                "Group no longer exists.");
+        }
+
+        var chatData =
+            new
+            {
+                chat.Id,
+                chat.Name,
+                chat.IsGroup,
+                chat.CreatorId,
+                chat.CreatedAt,
+
+                Members =
+                    chat.Members.Select(m =>
+                        new
+                        {
+                            m.UserId,
+                            m.User.Nickname
+                        }),
+
+                UnreadCount = 0
+            };
+
+
+        // ==========================================
+        // NOTIFY CREATOR
+        // ==========================================
+
+        if (chat.CreatorId.HasValue)
+        {
+            var user =
+                await _context.Users
+                    .Where(u =>
+                        u.Id == currentUserId)
+                    .Select(u =>
+                        new
+                        {
+                            u.Id,
+                            u.Nickname
+                        })
+                    .FirstAsync();
+
+            await _hubContext.Clients
+                .User(
+                    chat.CreatorId.Value
+                        .ToString())
+                .SendAsync(
+                    "GroupInvitationAccepted",
+                    new
+                    {
+                        ChatId =
+                            chat.Id,
+
+                        User = user
+                    });
+        }
 
         return Ok(new
         {
-            message =
-                "Chat request rejected."
+            chat = chatData
         });
     }
+
+
+    // ==========================================
+    // IGNORE GROUP INVITATION
+    // ==========================================
+
+    [HttpDelete(
+        "group-invitations/{invitationId}")]
+    public async Task<IActionResult>
+        IgnoreGroupInvitation(
+            int invitationId)
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        var invitation =
+            await _context.GroupInvitations
+                .FirstOrDefaultAsync(i =>
+                    i.Id == invitationId &&
+                    i.InvitedUserId ==
+                    currentUserId);
+
+        if (invitation == null)
+        {
+            return NotFound(
+                "Group invitation not found.");
+        }
+
+        _context.GroupInvitations.Remove(
+            invitation);
+
+        await _context.SaveChangesAsync();
+
+        return Ok();
+    }
+
 
     // ==========================================
     // DELETE CHAT
@@ -906,84 +986,93 @@ public class ChatsController : ControllerBase
 
         var chat =
             await _context.Chats
-                .Include(c => c.Members)
+                .Include(c =>
+                    c.Members)
                 .FirstOrDefaultAsync(c =>
                     c.Id == chatId);
 
         if (chat == null)
         {
-            return NotFound(new
-            {
-                message =
-                    "Chat not found."
-            });
+            return NotFound(
+                "Chat not found.");
         }
 
         var isMember =
             chat.Members.Any(m =>
-                m.UserId ==
-                currentUserId);
+                m.UserId == currentUserId);
 
         if (!isMember)
         {
             return Forbid();
         }
 
-        var otherMember =
+        if (chat.IsGroup &&
+            chat.CreatorId != currentUserId)
+        {
+            return Forbid();
+        }
+
+        var memberUserIds =
             chat.Members
-                .FirstOrDefault(m =>
-                    m.UserId !=
-                    currentUserId);
-
-        var otherUserId =
-            otherMember?.UserId;
-
-        var pendingRequest =
-            await _context.ChatRequests
-                .FirstOrDefaultAsync(r =>
-                    r.ChatId ==
-                    chatId);
+                .Select(m =>
+                    m.UserId.ToString())
+                .ToList();
 
         _context.Chats.Remove(chat);
 
         await _context.SaveChangesAsync();
 
-        if (otherUserId.HasValue)
+        if (memberUserIds.Count > 0)
         {
             await _hubContext.Clients
-                .User(
-                    otherUserId.Value
-                        .ToString()
-                )
+                .Users(memberUserIds)
                 .SendAsync(
                     "ChatDeleted",
-                    chatId
-                );
-        }
-        else if (pendingRequest != null)
-        {
-            await _hubContext.Clients
-                .User(
-                    pendingRequest.ReceiverId
-                        .ToString()
-                )
-                .SendAsync(
-                    "ChatDeleted",
-                    chatId
-                );
+                    new
+                    {
+                        ChatId = chatId
+                    });
         }
 
-        return Ok(new
+        return Ok();
+    }
+
+
+    // ==========================================
+    // CURRENT USER
+    // ==========================================
+
+    private int GetCurrentUserId()
+    {
+        var userId =
+            User.FindFirstValue(
+                ClaimTypes.NameIdentifier);
+
+        if (userId == null)
         {
-            message =
-                "Chat deleted."
-        });
+            throw new UnauthorizedAccessException();
+        }
+
+        return int.Parse(userId);
     }
 }
 
+
 // ==========================================
-// CREATE GROUP CHAT REQUEST
+// REQUEST MODELS
 // ==========================================
+
+public class SendMessageRequest
+{
+    public string Content { get; set; } = string.Empty;
+}
+
+
+public class CreatePrivateChatRequest
+{
+    public int UserId { get; set; }
+}
+
 
 public class CreateGroupChatRequest
 {

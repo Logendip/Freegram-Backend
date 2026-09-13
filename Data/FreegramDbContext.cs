@@ -25,6 +25,8 @@ public class FreegramDbContext : DbContext
 
     public DbSet<ChatRequest> ChatRequests { get; set; }
 
+    public DbSet<GroupInvitation> GroupInvitations { get; set; }
+
 
     protected override void OnModelCreating(
         ModelBuilder modelBuilder)
@@ -101,13 +103,11 @@ public class FreegramDbContext : DbContext
             .HasIndex(r => r.ChatId)
             .IsUnique();
 
-
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Chat)
             .WithMany()
             .HasForeignKey(r => r.ChatId)
             .OnDelete(DeleteBehavior.Cascade);
-
 
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Sender)
@@ -115,11 +115,41 @@ public class FreegramDbContext : DbContext
             .HasForeignKey(r => r.SenderId)
             .OnDelete(DeleteBehavior.Cascade);
 
-
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Receiver)
             .WithMany(u => u.ReceivedChatRequests)
             .HasForeignKey(r => r.ReceiverId)
             .OnDelete(DeleteBehavior.Cascade);
+
+
+        // ==========================================
+        // GROUP INVITATION
+        // ==========================================
+
+        modelBuilder.Entity<GroupInvitation>()
+            .HasIndex(i => new
+            {
+                i.ChatId,
+                i.InvitedUserId
+            })
+            .IsUnique();
+
+        modelBuilder.Entity<GroupInvitation>()
+            .HasOne(i => i.Chat)
+            .WithMany()
+            .HasForeignKey(i => i.ChatId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<GroupInvitation>()
+            .HasOne(i => i.InvitedUser)
+            .WithMany()
+            .HasForeignKey(i => i.InvitedUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<GroupInvitation>()
+            .HasOne(i => i.InvitedByUser)
+            .WithMany()
+            .HasForeignKey(i => i.InvitedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
