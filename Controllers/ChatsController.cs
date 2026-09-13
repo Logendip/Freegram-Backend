@@ -399,7 +399,8 @@ public class ChatsController : ControllerBase
 
         var existingUserIds =
             existingUsers
-                .Select(u => u.Id)
+                .Select(u =>
+                    u.Id)
                 .ToList();
 
         if (existingUserIds.Count !=
@@ -421,10 +422,17 @@ public class ChatsController : ControllerBase
         var chat =
             new Chat
             {
-                Name = request.Name.Trim(),
-                IsGroup = true,
-                CreatorId = currentUserId,
-                CreatedAt = DateTime.UtcNow
+                Name =
+                    request.Name.Trim(),
+
+                IsGroup =
+                    true,
+
+                CreatorId =
+                    currentUserId,
+
+                CreatedAt =
+                    DateTime.UtcNow
             };
 
         _context.Chats.Add(chat);
@@ -439,9 +447,14 @@ public class ChatsController : ControllerBase
         var creatorMember =
             new ChatMember
             {
-                ChatId = chat.Id,
-                UserId = currentUserId,
-                JoinedAt = DateTime.UtcNow
+                ChatId =
+                    chat.Id,
+
+                UserId =
+                    currentUserId,
+
+                JoinedAt =
+                    DateTime.UtcNow
             };
 
         _context.ChatMembers.Add(
@@ -456,10 +469,15 @@ public class ChatsController : ControllerBase
             existingUserIds.Select(userId =>
                 new GroupInvitation
                 {
-                    ChatId = chat.Id,
-                    InvitedUserId = userId,
+                    ChatId =
+                        chat.Id,
+
+                    InvitedUserId =
+                        userId,
+
                     InvitedByUserId =
                         currentUserId,
+
                     CreatedAt =
                         DateTime.UtcNow
                 })
@@ -540,7 +558,8 @@ public class ChatsController : ControllerBase
                             m.User.Nickname
                         }),
 
-                UnreadCount = 0
+                UnreadCount =
+                    0
             };
 
         return Ok(new
@@ -670,7 +689,8 @@ public class ChatsController : ControllerBase
                             m.User.Nickname
                         }),
 
-                UnreadCount = 0
+                UnreadCount =
+                    0
             };
 
         await _hubContext.Clients
@@ -894,7 +914,8 @@ public class ChatsController : ControllerBase
                             m.User.Nickname
                         }),
 
-                UnreadCount = 0
+                UnreadCount =
+                    0
             };
 
 
@@ -970,6 +991,153 @@ public class ChatsController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok();
+    }
+
+
+    // ==========================================
+    // REMOVE MEMBER FROM GROUP
+    // ==========================================
+
+    [HttpDelete(
+        "group/{chatId}/members/{userId}")]
+    public async Task<IActionResult>
+        RemoveGroupMember(
+            int chatId,
+            int userId)
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        // ==========================================
+        // LOAD GROUP
+        // ==========================================
+
+        var chat =
+            await _context.Chats
+                .Include(c =>
+                    c.Members)
+                .FirstOrDefaultAsync(c =>
+                    c.Id == chatId);
+
+        if (chat == null)
+        {
+            return NotFound(
+                "Chat not found.");
+        }
+
+        // ==========================================
+        // CHECK GROUP
+        // ==========================================
+
+        if (!chat.IsGroup)
+        {
+            return BadRequest(
+                "This chat is not a group.");
+        }
+
+        // ==========================================
+        // ONLY CREATOR CAN REMOVE MEMBERS
+        // ==========================================
+
+        if (chat.CreatorId != currentUserId)
+        {
+            return Forbid();
+        }
+
+        // ==========================================
+        // CREATOR CANNOT REMOVE HIMSELF
+        // ==========================================
+
+        if (userId == chat.CreatorId)
+        {
+            return BadRequest(
+                "The group creator cannot be removed.");
+        }
+
+        // ==========================================
+        // FIND MEMBER
+        // ==========================================
+
+        var member =
+            chat.Members
+                .FirstOrDefault(m =>
+                    m.UserId == userId);
+
+        if (member == null)
+        {
+            return NotFound(
+                "User is not a member of this group.");
+        }
+
+        // ==========================================
+        // REMOVE MEMBER
+        // ==========================================
+
+        _context.ChatMembers.Remove(
+            member);
+
+        // ==========================================
+        // REMOVE PENDING INVITATION IF EXISTS
+        // ==========================================
+
+        var invitation =
+            await _context.GroupInvitations
+                .FirstOrDefaultAsync(i =>
+                    i.ChatId == chatId &&
+                    i.InvitedUserId == userId);
+
+        if (invitation != null)
+        {
+            _context.GroupInvitations.Remove(
+                invitation);
+        }
+
+        await _context.SaveChangesAsync();
+
+        // ==========================================
+        // NOTIFY REMOVED USER
+        // ==========================================
+
+        await _hubContext.Clients
+            .User(userId.ToString())
+            .SendAsync(
+                "GroupMemberRemoved",
+                new
+                {
+                    ChatId = chatId,
+                    UserId = userId
+                });
+
+        // ==========================================
+        // NOTIFY REMAINING MEMBERS
+        // ==========================================
+
+        var remainingMemberIds =
+            chat.Members
+                .Where(m =>
+                    m.UserId != userId)
+                .Select(m =>
+                    m.UserId.ToString())
+                .ToList();
+
+        if (remainingMemberIds.Count > 0)
+        {
+            await _hubContext.Clients
+                .Users(remainingMemberIds)
+                .SendAsync(
+                    "GroupMemberRemoved",
+                    new
+                    {
+                        ChatId = chatId,
+                        UserId = userId
+                    });
+        }
+
+        return Ok(new
+        {
+            message =
+                "User removed from group."
+        });
     }
 
 
@@ -1064,7 +1232,8 @@ public class ChatsController : ControllerBase
 
 public class SendMessageRequest
 {
-    public string Content { get; set; } = string.Empty;
+    public string Content { get; set; } =
+        string.Empty;
 }
 
 
@@ -1076,8 +1245,9 @@ public class CreatePrivateChatRequest
 
 public class CreateGroupChatRequest
 {
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; set; } =
+        string.Empty;
 
-    public List<int> UserIds { get; set; }
-        = new List<int>();
+    public List<int> UserIds { get; set; } =
+        new List<int>();
 }
