@@ -1,5 +1,4 @@
-﻿
-namespace Freegram.Models;
+﻿namespace Freegram.Models;
 
 public class Chat
 {
@@ -9,6 +8,10 @@ public class Chat
 
     public bool IsGroup { get; set; }
 
+    public int? CreatorId { get; set; }
+
+    public User? Creator { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<ChatMember> Members { get; set; }
@@ -17,4 +20,3 @@ public class Chat
     public ICollection<Message> Messages { get; set; }
         = new List<Message>();
 }
-

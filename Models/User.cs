@@ -16,8 +16,14 @@ public class User
     public ICollection<Message> Messages { get; set; }
         = new List<Message>();
 
+    public ICollection<MessageRead> ReadMessages { get; set; }
+        = new List<MessageRead>();
+
     public ICollection<DeletedMessage> DeletedMessages { get; set; }
         = new List<DeletedMessage>();
+
+    public ICollection<Chat> CreatedChats { get; set; }
+        = new List<Chat>();
 
     public ICollection<ChatRequest> SentChatRequests { get; set; }
         = new List<ChatRequest>();

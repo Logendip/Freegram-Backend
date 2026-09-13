@@ -19,6 +19,8 @@ public class FreegramDbContext : DbContext
 
     public DbSet<Message> Messages { get; set; }
 
+    public DbSet<MessageRead> MessageReads { get; set; }
+
     public DbSet<DeletedMessage> DeletedMessages { get; set; }
 
     public DbSet<ChatRequest> ChatRequests { get; set; }
@@ -31,7 +33,43 @@ public class FreegramDbContext : DbContext
 
 
         // ==========================================
-        // DeletedMessage
+        // CHAT -> CREATOR
+        // ==========================================
+
+        modelBuilder.Entity<Chat>()
+            .HasOne(c => c.Creator)
+            .WithMany(u => u.CreatedChats)
+            .HasForeignKey(c => c.CreatorId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+
+        // ==========================================
+        // MESSAGE READ
+        // ==========================================
+
+        modelBuilder.Entity<MessageRead>()
+            .HasIndex(r => new
+            {
+                r.MessageId,
+                r.UserId
+            })
+            .IsUnique();
+
+        modelBuilder.Entity<MessageRead>()
+            .HasOne(r => r.Message)
+            .WithMany(m => m.ReadByUsers)
+            .HasForeignKey(r => r.MessageId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<MessageRead>()
+            .HasOne(r => r.User)
+            .WithMany(u => u.ReadMessages)
+            .HasForeignKey(r => r.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+
+        // ==========================================
+        // DELETED MESSAGE
         // ==========================================
 
         modelBuilder.Entity<DeletedMessage>()
@@ -56,17 +94,14 @@ public class FreegramDbContext : DbContext
 
 
         // ==========================================
-        // ChatRequest
+        // CHAT REQUEST
         // ==========================================
 
-        // Один chat не може мати два одночасних
-        // запити.
         modelBuilder.Entity<ChatRequest>()
             .HasIndex(r => r.ChatId)
             .IsUnique();
 
 
-        // ChatRequest -> Chat
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Chat)
             .WithMany()
@@ -74,7 +109,6 @@ public class FreegramDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
 
-        // ChatRequest -> Sender
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Sender)
             .WithMany(u => u.SentChatRequests)
@@ -82,7 +116,6 @@ public class FreegramDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
 
-        // ChatRequest -> Receiver
         modelBuilder.Entity<ChatRequest>()
             .HasOne(r => r.Receiver)
             .WithMany(u => u.ReceivedChatRequests)

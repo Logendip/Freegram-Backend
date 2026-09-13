@@ -1,4 +1,3 @@
-
 using Freegram.Data;
 using Freegram.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -19,10 +18,18 @@ builder.Services.AddControllers();
 // POSTGRESQL / ENTITY FRAMEWORK
 // ==========================================
 
+var connectionString =
+    builder.Configuration.GetConnectionString(
+        "DefaultConnection");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "Connection string 'DefaultConnection' was not found.");
+}
+
 builder.Services.AddDbContext<FreegramDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection")
-    ));
+    options.UseNpgsql(connectionString));
 
 // ==========================================
 // CORS
@@ -176,7 +183,6 @@ if (app.Environment.IsDevelopment())
 // CORS
 // ==========================================
 
-// CORS має виконуватися перед Authentication / Authorization.
 app.UseCors("Frontend");
 
 // ==========================================
