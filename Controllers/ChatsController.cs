@@ -84,7 +84,27 @@ public class ChatsController : ControllerBase
                                 m.User.Id,
                                 m.User.Nickname
                             })
-                            .ToList()
+                            .ToList(),
+
+                    // ==========================================
+                    // UNREAD COUNT
+                    // ==========================================
+
+                    UnreadCount =
+                        c.Messages
+                            .Count(message =>
+                                message.SenderId !=
+                                    currentUserId &&
+
+                                !message.DeletedByUsers
+                                    .Any(deleted =>
+                                        deleted.UserId ==
+                                        currentUserId) &&
+
+                                !message.ReadByUsers
+                                    .Any(read =>
+                                        read.UserId ==
+                                        currentUserId))
                 })
                 .ToListAsync();
 
@@ -872,3 +892,4 @@ public class ChatsController : ControllerBase
         });
     }
 }
+
