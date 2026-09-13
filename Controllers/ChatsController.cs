@@ -415,11 +415,6 @@ public class ChatsController : ControllerBase
                 .FirstAsync(u =>
                     u.Id == currentUserId);
 
-
-        // ==========================================
-        // CREATE GROUP
-        // ==========================================
-
         var chat =
             new Chat
             {
@@ -440,11 +435,6 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-
-        // ==========================================
-        // CREATOR BECOMES MEMBER
-        // ==========================================
-
         var creatorMember =
             new ChatMember
             {
@@ -460,11 +450,6 @@ public class ChatsController : ControllerBase
 
         _context.ChatMembers.Add(
             creatorMember);
-
-
-        // ==========================================
-        // CREATE INVITATIONS
-        // ==========================================
 
         var invitations =
             existingUserIds.Select(userId =>
@@ -488,11 +473,6 @@ public class ChatsController : ControllerBase
             invitations);
 
         await _context.SaveChangesAsync();
-
-
-        // ==========================================
-        // SEND REALTIME INVITATIONS
-        // ==========================================
 
         foreach (var invitation in invitations)
         {
@@ -526,11 +506,6 @@ public class ChatsController : ControllerBase
                         }
                     });
         }
-
-
-        // ==========================================
-        // RETURN GROUP TO CREATOR
-        // ==========================================
 
         var createdChat =
             await _context.Chats
@@ -583,10 +558,6 @@ public class ChatsController : ControllerBase
         var currentUserId =
             GetCurrentUserId();
 
-        // ==========================================
-        // LOAD GROUP
-        // ==========================================
-
         var chat =
             await _context.Chats
                 .Include(c =>
@@ -608,18 +579,10 @@ public class ChatsController : ControllerBase
                 "This chat is not a group.");
         }
 
-        // ==========================================
-        // ONLY CREATOR CAN ADD MEMBERS
-        // ==========================================
-
         if (chat.CreatorId != currentUserId)
         {
             return Forbid();
         }
-
-        // ==========================================
-        // VALIDATE TARGET USER
-        // ==========================================
 
         if (request.UserId == currentUserId)
         {
@@ -638,10 +601,6 @@ public class ChatsController : ControllerBase
                 "User not found.");
         }
 
-        // ==========================================
-        // CHECK EXISTING MEMBER
-        // ==========================================
-
         var alreadyMember =
             chat.Members.Any(m =>
                 m.UserId == request.UserId);
@@ -651,10 +610,6 @@ public class ChatsController : ControllerBase
             return BadRequest(
                 "User is already a member of this group.");
         }
-
-        // ==========================================
-        // REMOVE OLD INVITATION IF EXISTS
-        // ==========================================
 
         var pendingInvitation =
             await _context.GroupInvitations
@@ -667,10 +622,6 @@ public class ChatsController : ControllerBase
             _context.GroupInvitations.Remove(
                 pendingInvitation);
         }
-
-        // ==========================================
-        // ADD MEMBER
-        // ==========================================
 
         var member =
             new ChatMember
@@ -689,10 +640,6 @@ public class ChatsController : ControllerBase
             member);
 
         await _context.SaveChangesAsync();
-
-        // ==========================================
-        // LOAD FULL GROUP
-        // ==========================================
 
         var updatedChat =
             await _context.Chats
@@ -735,10 +682,6 @@ public class ChatsController : ControllerBase
                     targetUser.Nickname
             };
 
-        // ==========================================
-        // NOTIFY NEW MEMBER
-        // ==========================================
-
         await _hubContext.Clients
             .User(
                 request.UserId.ToString())
@@ -749,10 +692,6 @@ public class ChatsController : ControllerBase
                     Chat = chatData,
                     User = addedUser
                 });
-
-        // ==========================================
-        // NOTIFY EXISTING MEMBERS
-        // ==========================================
 
         var existingMemberIds =
             updatedChat.Members
@@ -849,8 +788,11 @@ public class ChatsController : ControllerBase
 
         if (request == null)
         {
-            return NotFound(
-                "Chat request not found.");
+            return NotFound(new
+            {
+                message =
+                    "Chat request not found."
+            });
         }
 
         var alreadyMember =
@@ -950,8 +892,11 @@ public class ChatsController : ControllerBase
 
         if (request == null)
         {
-            return NotFound(
-                "Chat request not found.");
+            return NotFound(new
+            {
+                message =
+                    "Chat request not found."
+            });
         }
 
         _context.ChatRequests.Remove(
@@ -959,7 +904,14 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok();
+        return Ok(new
+        {
+            message =
+                "Chat request rejected.",
+
+            requestId =
+                requestId
+        });
     }
 
 
@@ -1042,7 +994,11 @@ public class ChatsController : ControllerBase
         if (invitation == null)
         {
             return NotFound(
-                "Group invitation not found.");
+                new
+                {
+                    message =
+                        "Group invitation not found."
+                });
         }
 
         if (invitation.Chat == null)
@@ -1053,7 +1009,11 @@ public class ChatsController : ControllerBase
             await _context.SaveChangesAsync();
 
             return NotFound(
-                "Group no longer exists.");
+                new
+                {
+                    message =
+                        "Group no longer exists."
+                });
         }
 
         if (!invitation.Chat.IsGroup)
@@ -1064,7 +1024,11 @@ public class ChatsController : ControllerBase
             await _context.SaveChangesAsync();
 
             return BadRequest(
-                "This chat is not a group.");
+                new
+                {
+                    message =
+                        "This chat is not a group."
+                });
         }
 
         var alreadyMember =
@@ -1092,11 +1056,6 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-
-        // ==========================================
-        // LOAD FULL CHAT
-        // ==========================================
-
         var chat =
             await _context.Chats
                 .Where(c =>
@@ -1110,7 +1069,11 @@ public class ChatsController : ControllerBase
         if (chat == null)
         {
             return NotFound(
-                "Group no longer exists.");
+                new
+                {
+                    message =
+                        "Group no longer exists."
+                });
         }
 
         var chatData =
@@ -1133,11 +1096,6 @@ public class ChatsController : ControllerBase
                 UnreadCount =
                     0
             };
-
-
-        // ==========================================
-        // NOTIFY CREATOR
-        // ==========================================
 
         if (chat.CreatorId.HasValue)
         {
@@ -1164,7 +1122,8 @@ public class ChatsController : ControllerBase
                         ChatId =
                             chat.Id,
 
-                        User = user
+                        User =
+                            user
                     });
         }
 
@@ -1198,7 +1157,11 @@ public class ChatsController : ControllerBase
         if (invitation == null)
         {
             return NotFound(
-                "Group invitation not found.");
+                new
+                {
+                    message =
+                        "Group invitation not found."
+                });
         }
 
         _context.GroupInvitations.Remove(
@@ -1206,7 +1169,14 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok();
+        return Ok(new
+        {
+            message =
+                "Group invitation rejected.",
+
+            invitationId =
+                invitationId
+        });
     }
 
 
@@ -1382,7 +1352,11 @@ public class ChatsController : ControllerBase
                     });
         }
 
-        return Ok();
+        return Ok(new
+        {
+            message =
+                "Chat deleted."
+        });
     }
 
 
