@@ -188,6 +188,90 @@ public class ChatHub : Hub
     }
 
     // ==========================================
+    // MARK MESSAGE AS READ
+    // ==========================================
+
+    public async Task MarkMessageAsRead(
+        int chatId,
+        int messageId)
+    {
+        var userId =
+            GetCurrentUserId();
+
+        var isMember =
+            await _context.ChatMembers
+                .AnyAsync(m =>
+                    m.ChatId == chatId &&
+                    m.UserId == userId);
+
+        if (!isMember)
+        {
+            throw new HubException(
+                "You are not a member of this chat."
+            );
+        }
+
+        var message =
+            await _context.Messages
+                .FirstOrDefaultAsync(m =>
+                    m.Id == messageId &&
+                    m.ChatId == chatId);
+
+        if (message == null)
+        {
+            throw new HubException(
+                "Message not found."
+            );
+        }
+
+        // Не потрібно позначати власні
+        // повідомлення як прочитані самим собою.
+        if (message.SenderId == userId)
+        {
+            return;
+        }
+
+        var alreadyRead =
+            await _context.MessageReads
+                .AnyAsync(r =>
+                    r.MessageId == messageId &&
+                    r.UserId == userId);
+
+        if (alreadyRead)
+        {
+            return;
+        }
+
+        var messageRead =
+            new MessageRead
+            {
+                MessageId = messageId,
+                UserId = userId,
+                ReadAt = DateTime.UtcNow
+            };
+
+        _context.MessageReads.Add(
+            messageRead);
+
+        await _context.SaveChangesAsync();
+
+        // Повідомляємо відправника,
+        // що його повідомлення прочитано.
+        await Clients.User(
+                message.SenderId.ToString())
+            .SendAsync(
+                "MessageRead",
+                new
+                {
+                    MessageId = messageId,
+                    ChatId = chatId,
+                    UserId = userId,
+                    ReadAt = messageRead.ReadAt
+                }
+            );
+    }
+
+    // ==========================================
     // DELETE MESSAGE FOR EVERYONE
     // ==========================================
 
@@ -346,3 +430,4 @@ public class ChatHub : Hub
         return $"chat-{chatId}";
     }
 }
+
