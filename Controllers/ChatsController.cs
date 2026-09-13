@@ -1,5 +1,4 @@
-﻿
-using Freegram.Data;
+﻿using Freegram.Data;
 using Freegram.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,11 +25,6 @@ public class ChatsController : ControllerBase
         _hubContext = hubContext;
     }
 
-
-    // ==========================================
-    // GET CURRENT USER ID
-    // ==========================================
-
     private int GetCurrentUserId()
     {
         var userId =
@@ -46,11 +40,6 @@ public class ChatsController : ControllerBase
 
         return int.Parse(userId);
     }
-
-
-    // ==========================================
-    // GET CHATS
-    // ==========================================
 
     [HttpGet]
     public async Task<IActionResult> GetChats()
@@ -86,10 +75,6 @@ public class ChatsController : ControllerBase
                             })
                             .ToList(),
 
-                    // ==========================================
-                    // UNREAD COUNT
-                    // ==========================================
-
                     UnreadCount =
                         c.Messages
                             .Count(message =>
@@ -110,11 +95,6 @@ public class ChatsController : ControllerBase
 
         return Ok(chats);
     }
-
-
-    // ==========================================
-    // GET MESSAGES
-    // ==========================================
 
     [HttpGet("{chatId}/messages")]
     public async Task<IActionResult> GetMessages(
@@ -156,17 +136,21 @@ public class ChatsController : ControllerBase
                     {
                         m.Sender.Id,
                         m.Sender.Nickname
-                    }
+                    },
+
+                    IsRead =
+                        m.SenderId == currentUserId
+                            ? m.ReadByUsers.Any(r =>
+                                r.UserId !=
+                                currentUserId)
+                            : m.ReadByUsers.Any(r =>
+                                r.UserId ==
+                                currentUserId)
                 })
                 .ToListAsync();
 
         return Ok(messages);
     }
-
-
-    // ==========================================
-    // SEND MESSAGE
-    // ==========================================
 
     [HttpPost("{chatId}/messages")]
     public async Task<IActionResult> SendMessage(
@@ -240,11 +224,6 @@ public class ChatsController : ControllerBase
         });
     }
 
-
-    // ==========================================
-    // CREATE PRIVATE CHAT / CHAT REQUEST
-    // ==========================================
-
     [HttpPost("private/{userId}")]
     public async Task<IActionResult> CreatePrivateChat(
         int userId)
@@ -274,11 +253,6 @@ public class ChatsController : ControllerBase
                     "User not found."
             });
         }
-
-
-        // ==========================================
-        // CHECK EXISTING ACTIVE CHAT
-        // ==========================================
 
         var existingChat =
             await _context.Chats
@@ -321,11 +295,6 @@ public class ChatsController : ControllerBase
             });
         }
 
-
-        // ==========================================
-        // CHECK EXISTING REQUEST
-        // ==========================================
-
         var existingRequest =
             await _context.ChatRequests
                 .Include(r => r.Chat)
@@ -367,11 +336,6 @@ public class ChatsController : ControllerBase
             });
         }
 
-
-        // ==========================================
-        // CREATE CHAT
-        // ==========================================
-
         var chat =
             new Chat
             {
@@ -384,11 +348,6 @@ public class ChatsController : ControllerBase
         _context.Chats.Add(chat);
 
         await _context.SaveChangesAsync();
-
-
-        // ==========================================
-        // ADD SENDER AS MEMBER
-        // ==========================================
 
         var senderMember =
             new ChatMember
@@ -405,11 +364,6 @@ public class ChatsController : ControllerBase
 
         _context.ChatMembers.Add(
             senderMember);
-
-
-        // ==========================================
-        // CREATE REQUEST
-        // ==========================================
 
         var request =
             new ChatRequest
@@ -432,22 +386,13 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-
-        // ==========================================
-        // LOAD CHAT WITH MEMBERS
-        // ==========================================
-
         var createdChat =
             await _context.Chats
                 .Include(c => c.Members)
                     .ThenInclude(m => m.User)
                 .FirstAsync(c =>
-                    c.Id == chat.Id);
-
-
-        // ==========================================
-        // SEND REALTIME REQUEST
-        // ==========================================
+                    c.Id ==
+                    chat.Id);
 
         await _hubContext.Clients
             .User(
@@ -475,11 +420,6 @@ public class ChatsController : ControllerBase
                 }
             );
 
-
-        // ==========================================
-        // RETURN CHAT
-        // ==========================================
-
         return Ok(new
         {
             chat = new
@@ -504,11 +444,6 @@ public class ChatsController : ControllerBase
             pendingRequest = true
         });
     }
-
-
-    // ==========================================
-    // GET CHAT REQUESTS
-    // ==========================================
 
     [HttpGet("requests")]
     public async Task<IActionResult> GetChatRequests()
@@ -547,11 +482,6 @@ public class ChatsController : ControllerBase
         return Ok(requests);
     }
 
-
-    // ==========================================
-    // ACCEPT CHAT REQUEST
-    // ==========================================
-
     [HttpPost("requests/{requestId}/accept")]
     public async Task<IActionResult> AcceptChatRequest(
         int requestId)
@@ -584,11 +514,6 @@ public class ChatsController : ControllerBase
             return Forbid();
         }
 
-
-        // ==========================================
-        // ADD RECEIVER TO CHAT
-        // ==========================================
-
         var alreadyMember =
             await _context.ChatMembers
                 .AnyAsync(m =>
@@ -618,20 +543,10 @@ public class ChatsController : ControllerBase
             await _context.SaveChangesAsync();
         }
 
-
-        // ==========================================
-        // DELETE REQUEST
-        // ==========================================
-
         _context.ChatRequests.Remove(
             request);
 
         await _context.SaveChangesAsync();
-
-
-        // ==========================================
-        // LOAD CHAT AGAIN
-        // ==========================================
 
         var chat =
             await _context.Chats
@@ -650,11 +565,6 @@ public class ChatsController : ControllerBase
             });
         }
 
-
-        // ==========================================
-        // NOTIFY SENDER
-        // ==========================================
-
         await _hubContext.Clients
             .User(
                 request.SenderId
@@ -671,11 +581,6 @@ public class ChatsController : ControllerBase
                         currentUserId
                 }
             );
-
-
-        // ==========================================
-        // RETURN CHAT
-        // ==========================================
 
         return Ok(new
         {
@@ -702,11 +607,6 @@ public class ChatsController : ControllerBase
             }
         });
     }
-
-
-    // ==========================================
-    // REJECT CHAT REQUEST
-    // ==========================================
 
     [HttpDelete("requests/{requestId}")]
     public async Task<IActionResult> RejectChatRequest(
@@ -746,11 +646,6 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-
-        // ==========================================
-        // DELETE TEMPORARY CHAT
-        // ==========================================
-
         var chat =
             await _context.Chats
                 .FirstOrDefaultAsync(c =>
@@ -762,11 +657,6 @@ public class ChatsController : ControllerBase
 
             await _context.SaveChangesAsync();
         }
-
-
-        // ==========================================
-        // NOTIFY SENDER
-        // ==========================================
 
         await _hubContext.Clients
             .User(
@@ -783,11 +673,6 @@ public class ChatsController : ControllerBase
                 "Chat request rejected."
         });
     }
-
-
-    // ==========================================
-    // DELETE CHAT
-    // ==========================================
 
     [HttpDelete("{chatId}")]
     public async Task<IActionResult> DeleteChat(
@@ -821,11 +706,6 @@ public class ChatsController : ControllerBase
             return Forbid();
         }
 
-
-        // ==========================================
-        // FIND OTHER MEMBER
-        // ==========================================
-
         var otherMember =
             chat.Members
                 .FirstOrDefault(m =>
@@ -835,30 +715,15 @@ public class ChatsController : ControllerBase
         var otherUserId =
             otherMember?.UserId;
 
-
-        // ==========================================
-        // CHECK PENDING REQUEST
-        // ==========================================
-
         var pendingRequest =
             await _context.ChatRequests
                 .FirstOrDefaultAsync(r =>
                     r.ChatId ==
                     chatId);
 
-
-        // ==========================================
-        // DELETE CHAT
-        // ==========================================
-
         _context.Chats.Remove(chat);
 
         await _context.SaveChangesAsync();
-
-
-        // ==========================================
-        // NOTIFY OTHER USER
-        // ==========================================
 
         if (otherUserId.HasValue)
         {
@@ -892,4 +757,3 @@ public class ChatsController : ControllerBase
         });
     }
 }
-

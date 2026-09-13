@@ -182,7 +182,11 @@ public class ChatHub : Hub
                     message.Content,
                     message.CreatedAt,
 
-                    Sender = sender
+                    Sender = sender,
+
+                    // Нове повідомлення
+                    // спочатку завжди непрочитане.
+                    IsRead = false
                 }
             );
     }
@@ -430,4 +434,3 @@ public class ChatHub : Hub
         return $"chat-{chatId}";
     }
 }
-
