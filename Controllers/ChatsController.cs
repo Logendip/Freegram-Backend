@@ -41,6 +41,10 @@ public class ChatsController : ControllerBase
         return int.Parse(userId);
     }
 
+    // ==========================================
+    // GET ALL CHATS
+    // ==========================================
+
     [HttpGet]
     public async Task<IActionResult> GetChats()
     {
@@ -95,6 +99,10 @@ public class ChatsController : ControllerBase
 
         return Ok(chats);
     }
+
+    // ==========================================
+    // GET MESSAGES
+    // ==========================================
 
     [HttpGet("{chatId}/messages")]
     public async Task<IActionResult> GetMessages(
@@ -151,6 +159,10 @@ public class ChatsController : ControllerBase
 
         return Ok(messages);
     }
+
+    // ==========================================
+    // SEND MESSAGE
+    // ==========================================
 
     [HttpPost("{chatId}/messages")]
     public async Task<IActionResult> SendMessage(
@@ -223,6 +235,201 @@ public class ChatsController : ControllerBase
             Sender = sender
         });
     }
+
+    // ==========================================
+    // CREATE GROUP CHAT
+    // ==========================================
+
+    [HttpPost("group")]
+    public async Task<IActionResult> CreateGroupChat(
+        [FromBody] CreateGroupChatRequest request)
+    {
+        var currentUserId =
+            GetCurrentUserId();
+
+        if (request == null)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Request is required."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Group name is required."
+            });
+        }
+
+        var groupName =
+            request.Name.Trim();
+
+        if (groupName.Length > 100)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "Group name cannot exceed 100 characters."
+            });
+        }
+
+        var requestedUserIds =
+            request.UserIds
+                ?? new List<int>();
+
+        // ==========================================
+        // REMOVE DUPLICATES
+        // ==========================================
+
+        var memberUserIds =
+            requestedUserIds
+                .Append(currentUserId)
+                .Distinct()
+                .ToList();
+
+        if (memberUserIds.Count < 2)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "A group must contain at least 2 users."
+            });
+        }
+
+        // ==========================================
+        // CHECK USERS
+        // ==========================================
+
+        var users =
+            await _context.Users
+                .Where(u =>
+                    memberUserIds.Contains(u.Id))
+                .Select(u => new
+                {
+                    u.Id,
+                    u.Nickname
+                })
+                .ToListAsync();
+
+        if (users.Count !=
+            memberUserIds.Count)
+        {
+            return BadRequest(new
+            {
+                message =
+                    "One or more selected users were not found."
+            });
+        }
+
+        // ==========================================
+        // CREATE CHAT
+        // ==========================================
+
+        var chat =
+            new Chat
+            {
+                Name =
+                    groupName,
+
+                IsGroup =
+                    true,
+
+                CreatorId =
+                    currentUserId,
+
+                CreatedAt =
+                    DateTime.UtcNow
+            };
+
+        _context.Chats.Add(chat);
+
+        await _context.SaveChangesAsync();
+
+        // ==========================================
+        // ADD MEMBERS
+        // ==========================================
+
+        var members =
+            memberUserIds
+                .Select(userId =>
+                    new ChatMember
+                    {
+                        ChatId =
+                            chat.Id,
+
+                        UserId =
+                            userId,
+
+                        JoinedAt =
+                            DateTime.UtcNow
+                    })
+                .ToList();
+
+        _context.ChatMembers.AddRange(
+            members);
+
+        await _context.SaveChangesAsync();
+
+        // ==========================================
+        // LOAD CREATED CHAT
+        // ==========================================
+
+        var createdChat =
+            await _context.Chats
+                .Include(c => c.Members)
+                    .ThenInclude(m => m.User)
+                .FirstAsync(c =>
+                    c.Id ==
+                    chat.Id);
+
+        var chatData = new
+        {
+            createdChat.Id,
+            createdChat.Name,
+            createdChat.IsGroup,
+            createdChat.CreatedAt,
+
+            Members =
+                createdChat.Members
+                    .Where(m =>
+                        m.User != null)
+                    .Select(m => new
+                    {
+                        m.User.Id,
+                        m.User.Nickname
+                    })
+                    .ToList()
+        };
+
+        // ==========================================
+        // NOTIFY ALL MEMBERS
+        // ==========================================
+
+        foreach (var userId in memberUserIds)
+        {
+            await _hubContext.Clients
+                .User(
+                    userId.ToString()
+                )
+                .SendAsync(
+                    "GroupChatCreated",
+                    chatData
+                );
+        }
+
+        return Ok(new
+        {
+            chat = chatData
+        });
+    }
+
+    // ==========================================
+    // CREATE PRIVATE CHAT
+    // ==========================================
 
     [HttpPost("private/{userId}")]
     public async Task<IActionResult> CreatePrivateChat(
@@ -445,6 +652,10 @@ public class ChatsController : ControllerBase
         });
     }
 
+    // ==========================================
+    // GET CHAT REQUESTS
+    // ==========================================
+
     [HttpGet("requests")]
     public async Task<IActionResult> GetChatRequests()
     {
@@ -481,6 +692,10 @@ public class ChatsController : ControllerBase
 
         return Ok(requests);
     }
+
+    // ==========================================
+    // ACCEPT CHAT REQUEST
+    // ==========================================
 
     [HttpPost("requests/{requestId}/accept")]
     public async Task<IActionResult> AcceptChatRequest(
@@ -608,6 +823,10 @@ public class ChatsController : ControllerBase
         });
     }
 
+    // ==========================================
+    // REJECT CHAT REQUEST
+    // ==========================================
+
     [HttpDelete("requests/{requestId}")]
     public async Task<IActionResult> RejectChatRequest(
         int requestId)
@@ -673,6 +892,10 @@ public class ChatsController : ControllerBase
                 "Chat request rejected."
         });
     }
+
+    // ==========================================
+    // DELETE CHAT
+    // ==========================================
 
     [HttpDelete("{chatId}")]
     public async Task<IActionResult> DeleteChat(
@@ -756,4 +979,16 @@ public class ChatsController : ControllerBase
                 "Chat deleted."
         });
     }
+}
+
+// ==========================================
+// CREATE GROUP CHAT REQUEST
+// ==========================================
+
+public class CreateGroupChatRequest
+{
+    public string Name { get; set; } = string.Empty;
+
+    public List<int> UserIds { get; set; }
+        = new List<int>();
 }
