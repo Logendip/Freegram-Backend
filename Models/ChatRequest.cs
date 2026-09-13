@@ -4,9 +4,9 @@ public class ChatRequest
 {
     public int Id { get; set; }
 
-    public int ChatId { get; set; }
+    public int? ChatId { get; set; }
 
-    public Chat Chat { get; set; } = null!;
+    public Chat? Chat { get; set; }
 
     // Хто хоче почати чат
     public int SenderId { get; set; }

@@ -194,7 +194,7 @@ public class ChatsController : ControllerBase
 
 
     // ==========================================
-    // CREATE PRIVATE CHAT
+    // CREATE PRIVATE CHAT REQUEST
     // ==========================================
 
     [HttpPost("private")]
@@ -220,6 +220,10 @@ public class ChatsController : ControllerBase
             return NotFound(
                 "User not found.");
         }
+
+        // ==========================================
+        // CHECK EXISTING PRIVATE CHAT
+        // ==========================================
 
         var existingChat =
             await _context.Chats
@@ -259,38 +263,39 @@ public class ChatsController : ControllerBase
             });
         }
 
-        var chat =
-            new Chat
-            {
-                IsGroup = false,
-                CreatorId = currentUserId,
-                CreatedAt = DateTime.UtcNow
-            };
+        // ==========================================
+        // CHECK EXISTING PENDING REQUEST
+        // ==========================================
 
-        _context.Chats.Add(chat);
+        var existingRequest =
+            await _context.ChatRequests
+                .FirstOrDefaultAsync(r =>
+                    r.SenderId == currentUserId &&
+                    r.ReceiverId == request.UserId);
 
-        await _context.SaveChangesAsync();
+        if (existingRequest != null)
+        {
+            return BadRequest(
+                "Chat request has already been sent.");
+        }
 
-        var members =
-            new List<ChatMember>
-            {
-                new ChatMember
-                {
-                    ChatId = chat.Id,
-                    UserId = currentUserId,
-                    JoinedAt = DateTime.UtcNow
-                }
-            };
-
-        _context.ChatMembers.AddRange(members);
+        // ==========================================
+        // CREATE REQUEST ONLY
+        // ==========================================
 
         var chatRequest =
             new ChatRequest
             {
-                ChatId = chat.Id,
-                SenderId = currentUserId,
-                ReceiverId = request.UserId,
-                CreatedAt = DateTime.UtcNow
+                ChatId = null,
+
+                SenderId =
+                    currentUserId,
+
+                ReceiverId =
+                    request.UserId,
+
+                CreatedAt =
+                    DateTime.UtcNow
             };
 
         _context.ChatRequests.Add(
@@ -298,53 +303,44 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        // ==========================================
+        // SIGNALR → RECEIVER
+        // ==========================================
+
         await _hubContext.Clients
-            .User(request.UserId.ToString())
+            .User(
+                request.UserId.ToString())
             .SendAsync(
                 "ChatRequestCreated",
                 new
                 {
-                    Id = chatRequest.Id,
-                    ChatId = chat.Id,
+                    Id =
+                        chatRequest.Id,
+
+                    ChatId =
+                        (int?)null,
+
                     Sender = new
                     {
-                        Id = currentUserId,
+                        Id =
+                            currentUserId,
+
                         Nickname =
                             User.FindFirstValue(
                                 ClaimTypes.Name)
                     },
+
                     CreatedAt =
                         chatRequest.CreatedAt
                 });
 
-        var createdChat =
-            await _context.Chats
-                .Where(c =>
-                    c.Id == chat.Id)
-                .Include(c =>
-                    c.Members)
-                    .ThenInclude(m =>
-                        m.User)
-                .FirstAsync();
-
         return Ok(new
         {
-            chat = new
-            {
-                createdChat.Id,
-                createdChat.Name,
-                createdChat.IsGroup,
-                createdChat.CreatorId,
-                createdChat.CreatedAt,
+            requestId =
+                chatRequest.Id,
 
-                Members =
-                    createdChat.Members.Select(m =>
-                        new
-                        {
-                            m.UserId,
-                            m.User.Nickname
-                        })
-            }
+            message =
+                "Chat request sent."
         });
     }
 
@@ -741,8 +737,6 @@ public class ChatsController : ControllerBase
                     currentUserId)
                 .Include(r =>
                     r.Sender)
-                .Include(r =>
-                    r.Chat)
                 .OrderByDescending(r =>
                     r.CreatedAt)
                 .Select(r =>
@@ -778,9 +772,7 @@ public class ChatsController : ControllerBase
         var request =
             await _context.ChatRequests
                 .Include(r =>
-                    r.Chat)
-                    .ThenInclude(c =>
-                        c.Members)
+                    r.Sender)
                 .FirstOrDefaultAsync(r =>
                     r.Id == requestId &&
                     r.ReceiverId ==
@@ -795,17 +787,80 @@ public class ChatsController : ControllerBase
             });
         }
 
-        var alreadyMember =
-            request.Chat.Members.Any(m =>
-                m.UserId == currentUserId);
+        // ==========================================
+        // CHECK EXISTING PRIVATE CHAT
+        // ==========================================
 
-        if (!alreadyMember)
+        var existingChat =
+            await _context.Chats
+                .Where(c =>
+                    !c.IsGroup &&
+                    c.Members.Count == 2 &&
+                    c.Members.Any(m =>
+                        m.UserId == request.SenderId) &&
+                    c.Members.Any(m =>
+                        m.UserId == currentUserId))
+                .Include(c =>
+                    c.Members)
+                    .ThenInclude(m =>
+                        m.User)
+                .FirstOrDefaultAsync();
+
+        Chat chat;
+
+        if (existingChat != null)
         {
+            chat =
+                existingChat;
+        }
+        else
+        {
+            // ==========================================
+            // CREATE CHAT ONLY AFTER ACCEPT
+            // ==========================================
+
+            chat =
+                new Chat
+                {
+                    IsGroup = false,
+
+                    CreatorId =
+                        request.SenderId,
+
+                    CreatedAt =
+                        DateTime.UtcNow
+                };
+
+            _context.Chats.Add(chat);
+
+            await _context.SaveChangesAsync();
+
+            // ==========================================
+            // ADD SENDER
+            // ==========================================
+
             _context.ChatMembers.Add(
                 new ChatMember
                 {
                     ChatId =
-                        request.ChatId,
+                        chat.Id,
+
+                    UserId =
+                        request.SenderId,
+
+                    JoinedAt =
+                        DateTime.UtcNow
+                });
+
+            // ==========================================
+            // ADD RECEIVER
+            // ==========================================
+
+            _context.ChatMembers.Add(
+                new ChatMember
+                {
+                    ChatId =
+                        chat.Id,
 
                     UserId =
                         currentUserId,
@@ -815,15 +870,23 @@ public class ChatsController : ControllerBase
                 });
         }
 
+        // ==========================================
+        // REMOVE REQUEST
+        // ==========================================
+
         _context.ChatRequests.Remove(
             request);
 
         await _context.SaveChangesAsync();
 
-        var chat =
+        // ==========================================
+        // LOAD CHAT
+        // ==========================================
+
+        chat =
             await _context.Chats
                 .Where(c =>
-                    c.Id == request.ChatId)
+                    c.Id == chat.Id)
                 .Include(c =>
                     c.Members)
                     .ThenInclude(m =>
@@ -851,6 +914,10 @@ public class ChatsController : ControllerBase
                     0
             };
 
+        // ==========================================
+        // SIGNALR → SENDER
+        // ==========================================
+
         await _hubContext.Clients
             .User(
                 request.SenderId.ToString())
@@ -862,7 +929,10 @@ public class ChatsController : ControllerBase
                         chat.Id,
 
                     UserId =
-                        currentUserId
+                        currentUserId,
+
+                    Chat =
+                        chatData
                 });
 
         return Ok(new
@@ -885,6 +955,8 @@ public class ChatsController : ControllerBase
 
         var request =
             await _context.ChatRequests
+                .Include(r =>
+                    r.Receiver)
                 .FirstOrDefaultAsync(r =>
                     r.Id == requestId &&
                     r.ReceiverId ==
@@ -899,10 +971,40 @@ public class ChatsController : ControllerBase
             });
         }
 
+        var receiverNickname =
+            request.Receiver.Nickname;
+
+        var senderId =
+            request.SenderId;
+
         _context.ChatRequests.Remove(
             request);
 
         await _context.SaveChangesAsync();
+
+        // ==========================================
+        // SIGNALR → SENDER
+        // ==========================================
+
+        await _hubContext.Clients
+            .User(
+                senderId.ToString())
+            .SendAsync(
+                "ChatRequestRejected",
+                new
+                {
+                    RequestId =
+                        requestId,
+
+                    UserId =
+                        currentUserId,
+
+                    Nickname =
+                        receiverNickname,
+
+                    Message =
+                        $"{receiverNickname} відхилив(ла) ваше запрошення."
+                });
 
         return Ok(new
         {
