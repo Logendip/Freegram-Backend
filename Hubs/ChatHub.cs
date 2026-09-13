@@ -171,24 +171,37 @@ public class ChatHub : Hub
                 })
                 .FirstAsync();
 
-        await Clients.Group(
-                GetGroupName(chatId))
-            .SendAsync(
-                "ReceiveMessage",
-                new
-                {
-                    message.Id,
-                    message.ChatId,
-                    message.Content,
-                    message.CreatedAt,
+        var messageData = new
+        {
+            message.Id,
+            message.ChatId,
+            message.Content,
+            message.CreatedAt,
 
-                    Sender = sender,
+            Sender = sender,
 
-                    // Нове повідомлення
-                    // спочатку завжди непрочитане.
-                    IsRead = false
-                }
-            );
+            IsRead = false
+        };
+
+        // ==========================================
+        // SEND TO ALL CHAT MEMBERS
+        // ==========================================
+
+        var memberUserIds =
+            chat.Members
+                .Select(m =>
+                    m.UserId.ToString())
+                .ToList();
+
+        if (memberUserIds.Count > 0)
+        {
+            await Clients.Users(
+                    memberUserIds)
+                .SendAsync(
+                    "ReceiveMessage",
+                    messageData
+                );
+        }
     }
 
     // ==========================================
