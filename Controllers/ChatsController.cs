@@ -1,10 +1,13 @@
-﻿using Freegram.Data;
+﻿
+using Freegram.Data;
 using Freegram.Hubs;
 using Freegram.Models;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+
 using System.Security.Claims;
 
 namespace Freegram.Controllers;
@@ -179,10 +182,17 @@ public class ChatsController : ControllerBase
         var message =
             new Message
             {
-                ChatId = chatId,
-                SenderId = currentUserId,
-                Content = request.Content.Trim(),
-                CreatedAt = DateTime.UtcNow
+                ChatId =
+                    chatId,
+
+                SenderId =
+                    currentUserId,
+
+                Content =
+                    request.Content.Trim(),
+
+                CreatedAt =
+                    DateTime.UtcNow
             };
 
         _context.Messages.Add(message);
@@ -220,6 +230,7 @@ public class ChatsController : ControllerBase
             return NotFound(
                 "User not found.");
         }
+
 
         // ==========================================
         // CHECK EXISTING PRIVATE CHAT
@@ -263,6 +274,7 @@ public class ChatsController : ControllerBase
             });
         }
 
+
         // ==========================================
         // CHECK EXISTING PENDING REQUEST
         // ==========================================
@@ -275,9 +287,16 @@ public class ChatsController : ControllerBase
 
         if (existingRequest != null)
         {
-            return BadRequest(
-                "Chat request has already been sent.");
+            return Ok(new
+            {
+                requestId =
+                    existingRequest.Id,
+
+                message =
+                    "Chat request already sent."
+            });
         }
+
 
         // ==========================================
         // CREATE REQUEST ONLY
@@ -286,7 +305,8 @@ public class ChatsController : ControllerBase
         var chatRequest =
             new ChatRequest
             {
-                ChatId = null,
+                ChatId =
+                    null,
 
                 SenderId =
                     currentUserId,
@@ -302,6 +322,7 @@ public class ChatsController : ControllerBase
             chatRequest);
 
         await _context.SaveChangesAsync();
+
 
         // ==========================================
         // SIGNALR → RECEIVER
@@ -333,6 +354,7 @@ public class ChatsController : ControllerBase
                     CreatedAt =
                         chatRequest.CreatedAt
                 });
+
 
         return Ok(new
         {
@@ -431,6 +453,11 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+
+        // ==========================================
+        // ADD CREATOR
+        // ==========================================
+
         var creatorMember =
             new ChatMember
             {
@@ -446,6 +473,11 @@ public class ChatsController : ControllerBase
 
         _context.ChatMembers.Add(
             creatorMember);
+
+
+        // ==========================================
+        // CREATE GROUP INVITATIONS
+        // ==========================================
 
         var invitations =
             existingUserIds.Select(userId =>
@@ -469,6 +501,11 @@ public class ChatsController : ControllerBase
             invitations);
 
         await _context.SaveChangesAsync();
+
+
+        // ==========================================
+        // SIGNALR → INVITED USERS
+        // ==========================================
 
         foreach (var invitation in invitations)
         {
@@ -502,6 +539,11 @@ public class ChatsController : ControllerBase
                         }
                     });
         }
+
+
+        // ==========================================
+        // LOAD CREATED CHAT
+        // ==========================================
 
         var createdChat =
             await _context.Chats
@@ -637,6 +679,11 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+
+        // ==========================================
+        // LOAD UPDATED CHAT
+        // ==========================================
+
         var updatedChat =
             await _context.Chats
                 .Where(c =>
@@ -668,6 +715,7 @@ public class ChatsController : ControllerBase
                     0
             };
 
+
         var addedUser =
             new
             {
@@ -677,6 +725,11 @@ public class ChatsController : ControllerBase
                 Nickname =
                     targetUser.Nickname
             };
+
+
+        // ==========================================
+        // SIGNALR → NEW MEMBER
+        // ==========================================
 
         await _hubContext.Clients
             .User(
@@ -688,6 +741,11 @@ public class ChatsController : ControllerBase
                     Chat = chatData,
                     User = addedUser
                 });
+
+
+        // ==========================================
+        // SIGNALR → EXISTING MEMBERS
+        // ==========================================
 
         var existingMemberIds =
             updatedChat.Members
@@ -787,6 +845,7 @@ public class ChatsController : ControllerBase
             });
         }
 
+
         // ==========================================
         // CHECK EXISTING PRIVATE CHAT
         // ==========================================
@@ -822,7 +881,8 @@ public class ChatsController : ControllerBase
             chat =
                 new Chat
                 {
-                    IsGroup = false,
+                    IsGroup =
+                        false,
 
                     CreatorId =
                         request.SenderId,
@@ -834,6 +894,7 @@ public class ChatsController : ControllerBase
             _context.Chats.Add(chat);
 
             await _context.SaveChangesAsync();
+
 
             // ==========================================
             // ADD SENDER
@@ -851,6 +912,7 @@ public class ChatsController : ControllerBase
                     JoinedAt =
                         DateTime.UtcNow
                 });
+
 
             // ==========================================
             // ADD RECEIVER
@@ -870,6 +932,7 @@ public class ChatsController : ControllerBase
                 });
         }
 
+
         // ==========================================
         // REMOVE REQUEST
         // ==========================================
@@ -878,6 +941,7 @@ public class ChatsController : ControllerBase
             request);
 
         await _context.SaveChangesAsync();
+
 
         // ==========================================
         // LOAD CHAT
@@ -914,6 +978,7 @@ public class ChatsController : ControllerBase
                     0
             };
 
+
         // ==========================================
         // SIGNALR → SENDER
         // ==========================================
@@ -934,6 +999,7 @@ public class ChatsController : ControllerBase
                     Chat =
                         chatData
                 });
+
 
         return Ok(new
         {
@@ -977,10 +1043,16 @@ public class ChatsController : ControllerBase
         var senderId =
             request.SenderId;
 
+
+        // ==========================================
+        // DELETE REQUEST
+        // ==========================================
+
         _context.ChatRequests.Remove(
             request);
 
         await _context.SaveChangesAsync();
+
 
         // ==========================================
         // SIGNALR → SENDER
@@ -1005,6 +1077,7 @@ public class ChatsController : ControllerBase
                     Message =
                         $"{receiverNickname} відхилив(ла) ваше запрошення."
                 });
+
 
         return Ok(new
         {
@@ -1158,6 +1231,11 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+
+        // ==========================================
+        // LOAD UPDATED CHAT
+        // ==========================================
+
         var chat =
             await _context.Chats
                 .Where(c =>
@@ -1199,6 +1277,11 @@ public class ChatsController : ControllerBase
                     0
             };
 
+
+        // ==========================================
+        // SIGNALR → GROUP CREATOR
+        // ==========================================
+
         if (chat.CreatorId.HasValue)
         {
             var user =
@@ -1229,6 +1312,7 @@ public class ChatsController : ControllerBase
                     });
         }
 
+
         return Ok(new
         {
             chat = chatData
@@ -1237,7 +1321,7 @@ public class ChatsController : ControllerBase
 
 
     // ==========================================
-    // IGNORE GROUP INVITATION
+    // REJECT / IGNORE GROUP INVITATION
     // ==========================================
 
     [HttpDelete(
@@ -1249,8 +1333,15 @@ public class ChatsController : ControllerBase
         var currentUserId =
             GetCurrentUserId();
 
+
+        // ==========================================
+        // LOAD INVITATION + GROUP
+        // ==========================================
+
         var invitation =
             await _context.GroupInvitations
+                .Include(i =>
+                    i.Chat)
                 .FirstOrDefaultAsync(i =>
                     i.Id == invitationId &&
                     i.InvitedUserId ==
@@ -1266,19 +1357,90 @@ public class ChatsController : ControllerBase
                 });
         }
 
+
+        // ==========================================
+        // SAVE DATA BEFORE DELETE
+        // ==========================================
+
+        var creatorId =
+            invitation.InvitedByUserId;
+
+        var chatId =
+            invitation.ChatId;
+
+        var groupName =
+            invitation.Chat?.Name ??
+            "групи";
+
+
+        // ==========================================
+        // GET CURRENT USER
+        // ==========================================
+
+        var currentUser =
+            await _context.Users
+                .FirstOrDefaultAsync(u =>
+                    u.Id == currentUserId);
+
+        if (currentUser == null)
+        {
+            return Unauthorized();
+        }
+
+        var nickname =
+            currentUser.Nickname;
+
+
+        // ==========================================
+        // DELETE INVITATION
+        // ==========================================
+
         _context.GroupInvitations.Remove(
             invitation);
 
         await _context.SaveChangesAsync();
 
-        return Ok(new
-        {
-            message =
-                "Group invitation rejected.",
 
-            invitationId =
-                invitationId
-        });
+        // ==========================================
+        // SIGNALR → GROUP CREATOR
+        // ==========================================
+
+        await _hubContext.Clients
+            .User(
+                creatorId.ToString())
+            .SendAsync(
+                "GroupInvitationRejected",
+                new
+                {
+                    InvitationId =
+                        invitationId,
+
+                    ChatId =
+                        chatId,
+
+                    UserId =
+                        currentUserId,
+
+                    Nickname =
+                        nickname,
+
+                    GroupName =
+                        groupName,
+
+                    Message =
+                        $"{nickname} відмовився приєднатися до групи {groupName}."
+                });
+
+
+        return Ok(
+            new
+            {
+                message =
+                    "Group invitation rejected.",
+
+                invitationId =
+                    invitationId
+            });
     }
 
 
@@ -1340,6 +1502,11 @@ public class ChatsController : ControllerBase
         _context.ChatMembers.Remove(
             member);
 
+
+        // ==========================================
+        // REMOVE PENDING INVITATION IF EXISTS
+        // ==========================================
+
         var invitation =
             await _context.GroupInvitations
                 .FirstOrDefaultAsync(i =>
@@ -1354,15 +1521,28 @@ public class ChatsController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+
+        // ==========================================
+        // SIGNALR → REMOVED USER
+        // ==========================================
+
         await _hubContext.Clients
             .User(userId.ToString())
             .SendAsync(
                 "GroupMemberRemoved",
                 new
                 {
-                    ChatId = chatId,
-                    UserId = userId
+                    ChatId =
+                        chatId,
+
+                    UserId =
+                        userId
                 });
+
+
+        // ==========================================
+        // SIGNALR → REMAINING MEMBERS
+        // ==========================================
 
         var remainingMemberIds =
             chat.Members
@@ -1380,10 +1560,14 @@ public class ChatsController : ControllerBase
                     "GroupMemberRemoved",
                     new
                     {
-                        ChatId = chatId,
-                        UserId = userId
+                        ChatId =
+                            chatId,
+
+                        UserId =
+                            userId
                     });
         }
+
 
         return Ok(new
         {
@@ -1432,15 +1616,30 @@ public class ChatsController : ControllerBase
             return Forbid();
         }
 
+
+        // ==========================================
+        // SAVE MEMBER IDS BEFORE DELETE
+        // ==========================================
+
         var memberUserIds =
             chat.Members
                 .Select(m =>
                     m.UserId.ToString())
                 .ToList();
 
+
+        // ==========================================
+        // DELETE CHAT
+        // ==========================================
+
         _context.Chats.Remove(chat);
 
         await _context.SaveChangesAsync();
+
+
+        // ==========================================
+        // SIGNALR → ALL MEMBERS
+        // ==========================================
 
         if (memberUserIds.Count > 0)
         {
@@ -1450,9 +1649,11 @@ public class ChatsController : ControllerBase
                     "ChatDeleted",
                     new
                     {
-                        ChatId = chatId
+                        ChatId =
+                            chatId
                     });
         }
+
 
         return Ok(new
         {
